@@ -1,0 +1,57 @@
+# Build directories
+build/
+cmake-build-*/
+
+# IDE files
+.vscode/
+.idea/
+*.xcodeproj
+*.sln
+*.vcxproj*
+
+# Compiled binaries
+*.exe
+*.out
+*.app
+Yolo
+yolo
+
+# Object files
+*.o
+*.obj
+
+# Library files
+*.a
+*.lib
+*.dylib
+*.so
+*.dll
+
+# CMake files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Linux
+*.so.*
+
+# Windows
+*.pdb
+*.ilk
+
+# Logs
+*.log
+
+# Temporary files
+*~
+*.tmp
+*.temp
+
+# Assets (uncomment if you don't want to track assets)
+# assets/
