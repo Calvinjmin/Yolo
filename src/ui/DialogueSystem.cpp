@@ -1,4 +1,5 @@
 #include "DialogueSystem.h"
+#include "NPC.h"
 #include <algorithm>
 #include <iostream>
 
@@ -71,6 +72,14 @@ InteractableType DialogueSystem::CheckNearbyInteraction(const Vector2& playerPos
         32  // PLAYER_HEIGHT
     );
     
+    // First check dynamic interactables (they get priority)
+    for (const auto& interactable : dynamicInteractables_) {
+        if (interactable && interactable->IsPlayerInRange(playerPosition)) {
+            return interactable->GetType();
+        }
+    }
+    
+    // Then check static zones
     for (const auto& zone : interactionZones_) {
         // Check if player is near the interaction zone (large area for easy interaction)
         int expandedMargin = 80;
@@ -99,29 +108,57 @@ bool DialogueSystem::CheckInteraction(const Vector2& playerPosition, const Vecto
 
 void DialogueSystem::ShowDialogue(InteractableType type) {
     currentType_ = type;
-    auto dialogues = GetDialogueForType(type);
     
-    if (!dialogues.empty()) {
-        // Find the zone to get current dialogue index
-        for (auto& zone : interactionZones_) {
-            if (zone.type == type) {
-                currentText_ = dialogues[zone.currentDialogue];
-                break;
+    if (type == InteractableType::NPC) {
+        // Handle dynamic NPCs
+        for (const auto& interactable : dynamicInteractables_) {
+            if (interactable && interactable->GetType() == type) {
+                if (auto npc = dynamic_cast<NPC*>(interactable)) {
+                    currentText_ = npc->GetCurrentDialogue();
+                    break;
+                }
+            }
+        }
+    } else {
+        // Handle static zones
+        auto dialogues = GetDialogueForType(type);
+        if (!dialogues.empty()) {
+            for (auto& zone : interactionZones_) {
+                if (zone.type == type) {
+                    currentText_ = dialogues[zone.currentDialogue];
+                    break;
+                }
             }
         }
     }
+    
     isActive_ = true;
     displayTimer_ = 0.0f;
     fadeAlpha_ = 255.0f; // Start fully visible
 }
 
 void DialogueSystem::NextDialogue() {
-    for (auto& zone : interactionZones_) {
-        if (zone.type == currentType_) {
-            zone.currentDialogue = (zone.currentDialogue + 1) % zone.dialogues.size();
-            currentText_ = zone.dialogues[zone.currentDialogue];
-            displayTimer_ = 0.0f;
-            break;
+    if (currentType_ == InteractableType::NPC) {
+        // Handle dynamic NPCs
+        for (const auto& interactable : dynamicInteractables_) {
+            if (interactable && interactable->GetType() == currentType_) {
+                if (auto npc = dynamic_cast<NPC*>(interactable)) {
+                    npc->NextDialogue();
+                    currentText_ = npc->GetCurrentDialogue();
+                    displayTimer_ = 0.0f;
+                    break;
+                }
+            }
+        }
+    } else {
+        // Handle static zones
+        for (auto& zone : interactionZones_) {
+            if (zone.type == currentType_) {
+                zone.currentDialogue = (zone.currentDialogue + 1) % zone.dialogues.size();
+                currentText_ = zone.dialogues[zone.currentDialogue];
+                displayTimer_ = 0.0f;
+                break;
+            }
         }
     }
 }
@@ -135,12 +172,36 @@ void DialogueSystem::SetNearInteractable(bool near, InteractableType type) {
     nearbyType_ = type;
 }
 
+void DialogueSystem::RegisterDynamicInteractable(Interactable* interactable) {
+    if (interactable) {
+        dynamicInteractables_.push_back(interactable);
+    }
+}
+
+InteractableType DialogueSystem::CheckNearbyDynamicInteraction(const Vector2& playerPosition) {
+    for (const auto& interactable : dynamicInteractables_) {
+        if (interactable && interactable->IsPlayerInRange(playerPosition)) {
+            return interactable->GetType();
+        }
+    }
+    return InteractableType::NONE;
+}
+
 std::vector<std::string> DialogueSystem::GetDialogueForType(InteractableType type) {
+    // First check static zones
     for (const auto& zone : interactionZones_) {
         if (zone.type == type) {
             return zone.dialogues;
         }
     }
+    
+    // Then check dynamic interactables
+    for (const auto& interactable : dynamicInteractables_) {
+        if (interactable && interactable->GetType() == type) {
+            return interactable->GetDialogue();
+        }
+    }
+    
     return {};
 }
 
@@ -178,7 +239,8 @@ void DialogueSystem::RenderInteractionPrompt(Renderer* renderer, int windowWidth
     renderer->DrawRect(borderRight, borderColor);
     
     // Text - centered in wider box
-    RenderText(renderer, "Press SPACE to interact", promptX + 30, promptY + 18);
+    SDL_Color promptTextColor = {255, 255, 255, 255};
+    renderer->RenderText("Press SPACE to interact", promptX + 30, promptY + 18, promptTextColor, 16);
 }
 
 void DialogueSystem::RenderDialogueBox(Renderer* renderer, int windowWidth, int windowHeight) {
@@ -223,127 +285,16 @@ void DialogueSystem::RenderDialogueBox(Renderer* renderer, int windowWidth, int 
     renderer->DrawRect(cornerTL, highlightColor);
     renderer->DrawRect(cornerTR, highlightColor);
     
-    // Render main dialogue text
+    // Render main dialogue text with wrapping
     if (!currentText_.empty()) {
-        RenderText(renderer, currentText_, boxX + 20, boxY + 20);
+        SDL_Color textColor = {255, 255, 255, 255};
+        renderer->RenderWrappedText(currentText_, boxX + 20, boxY + 20, boxWidth - 40, textColor, 18);
     }
     
     // Control hints at bottom right
     SDL_Color hintColor = {160, 160, 180, 200};
     int hintY = boxY + boxHeight - 25;
-    RenderHintText(renderer, "E: More info", boxX + 20, hintY, hintColor);
-    RenderHintText(renderer, "Q: Exit", boxX + 120, hintY, hintColor);
+    renderer->RenderText("E: More info", boxX + 20, hintY, hintColor, 14);
+    renderer->RenderText("Q: Exit", boxX + 120, hintY, hintColor, 14);
 }
 
-void DialogueSystem::RenderText(Renderer* renderer, const std::string& text, int x, int y) {
-    // Simple bitmap-style text rendering with basic character patterns
-    SDL_Color textColor = {255, 255, 255, 255}; // White text
-    
-    int charWidth = 6;
-    int charHeight = 8;
-    int spacing = 2;
-    
-    for (size_t i = 0; i < text.length(); ++i) {
-        char c = text[i];
-        int charX = x + static_cast<int>(i) * (charWidth + spacing);
-        
-        if (c == ' ') {
-            continue; // Skip spaces
-        }
-        
-        // Simple bitmap patterns for common characters
-        RenderCharacter(renderer, c, charX, y, charWidth, charHeight, textColor);
-    }
-}
-
-void DialogueSystem::RenderHintText(Renderer* renderer, const std::string& text, int x, int y, SDL_Color color) {
-    // Smaller text for hints
-    int charWidth = 5;
-    int charHeight = 6;
-    int spacing = 1;
-    
-    for (size_t i = 0; i < text.length(); ++i) {
-        char c = text[i];
-        int charX = x + static_cast<int>(i) * (charWidth + spacing);
-        
-        if (c == ' ') {
-            continue; // Skip spaces
-        }
-        
-        // Render smaller characters for hints
-        RenderCharacter(renderer, c, charX, y, charWidth, charHeight, color);
-    }
-}
-
-void DialogueSystem::RenderCharacter(Renderer* renderer, char c, int x, int y, int w, int h, SDL_Color color) {
-    // Simple 6x8 bitmap font patterns
-    std::vector<std::vector<int>> pattern;
-    
-    switch (c) {
-        case 'A': pattern = {{0,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,1,1,1,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'B': pattern = {{1,1,1,1,0,0},{1,0,0,0,1,0},{1,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,1,1,1,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'C': pattern = {{0,1,1,1,1,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{0,1,1,1,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'D': pattern = {{1,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,1,1,1,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'E': pattern = {{1,1,1,1,1,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{1,1,1,1,0,0},{1,0,0,0,0,0},{1,1,1,1,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'F': pattern = {{1,1,1,1,1,0},{1,0,0,0,0,0},{1,1,1,1,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'G': pattern = {{0,1,1,1,1,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{1,0,1,1,1,0},{1,0,0,0,1,0},{0,1,1,1,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'H': pattern = {{1,0,0,0,1,0},{1,0,0,0,1,0},{1,1,1,1,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'I': pattern = {{1,1,1,1,1,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{1,1,1,1,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'L': pattern = {{1,0,0,0,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{1,1,1,1,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'M': pattern = {{1,0,0,0,1,0},{1,1,0,1,1,0},{1,0,1,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'N': pattern = {{1,0,0,0,1,0},{1,1,0,0,1,0},{1,0,1,0,1,0},{1,0,0,1,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'O': pattern = {{0,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,1,1,1,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'P': pattern = {{1,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,1,1,1,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'Q': pattern = {{0,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,1,0,1,0},{1,0,0,1,1,0},{0,1,1,1,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'R': pattern = {{1,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,1,1,1,0,0},{1,0,0,1,0,0},{1,0,0,0,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'S': pattern = {{0,1,1,1,1,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{0,1,1,1,0,0},{0,0,0,0,1,0},{1,1,1,1,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'T': pattern = {{1,1,1,1,1,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'U': pattern = {{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,1,1,1,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'V': pattern = {{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,1,0,1,0,0},{0,1,0,1,0,0},{0,0,1,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'W': pattern = {{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,1,0,1,0},{1,0,1,0,1,0},{1,1,0,1,1,0},{1,0,0,0,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'Y': pattern = {{1,0,0,0,1,0},{1,0,0,0,1,0},{0,1,0,1,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        
-        // Lowercase letters
-        case 'a': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{0,1,1,1,0,0},{0,0,0,0,1,0},{0,1,1,1,1,0},{1,0,0,0,1,0},{0,1,1,1,1,0},{0,0,0,0,0,0}}; break;
-        case 'b': pattern = {{1,0,0,0,0,0},{1,0,0,0,0,0},{1,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,1,1,1,0,0},{0,0,0,0,0,0}}; break;
-        case 'c': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{0,1,1,1,1,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{0,1,1,1,1,0},{0,0,0,0,0,0}}; break;
-        case 'd': pattern = {{0,0,0,0,1,0},{0,0,0,0,1,0},{0,1,1,1,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,1,1,1,1,0},{0,0,0,0,0,0}}; break;
-        case 'e': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{0,1,1,1,0,0},{1,0,0,0,1,0},{1,1,1,1,0,0},{1,0,0,0,0,0},{0,1,1,1,1,0},{0,0,0,0,0,0}}; break;
-        case 'f': pattern = {{0,0,1,1,1,0},{0,1,0,0,0,0},{0,1,0,0,0,0},{1,1,1,1,0,0},{0,1,0,0,0,0},{0,1,0,0,0,0},{0,1,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'g': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{0,1,1,1,1,0},{1,0,0,0,1,0},{0,1,1,1,1,0},{0,0,0,0,1,0},{1,1,1,1,0,0},{0,0,0,0,0,0}}; break;
-        case 'h': pattern = {{1,0,0,0,0,0},{1,0,0,0,0,0},{1,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,0,0,0,0,0}}; break;
-        case 'i': pattern = {{0,0,1,0,0,0},{0,0,0,0,0,0},{0,1,1,0,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,1,1,1,0,0},{0,0,0,0,0,0}}; break;
-        case 'k': pattern = {{1,0,0,0,0,0},{1,0,0,1,0,0},{1,0,1,0,0,0},{1,1,0,0,0,0},{1,0,1,0,0,0},{1,0,0,1,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'l': pattern = {{1,1,0,0,0,0},{0,1,0,0,0,0},{0,1,0,0,0,0},{0,1,0,0,0,0},{0,1,0,0,0,0},{1,1,1,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'm': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{1,1,0,1,1,0},{1,0,1,0,1,0},{1,0,1,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,0,0,0,0,0}}; break;
-        case 'n': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{1,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,0,0,0,0,0}}; break;
-        case 'o': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{0,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,1,1,1,0,0},{0,0,0,0,0,0}}; break;
-        case 'p': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{1,1,1,1,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,1,1,1,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0}}; break;
-        case 'r': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{1,0,1,1,0,0},{1,1,0,0,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{1,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 's': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{0,1,1,1,1,0},{1,0,0,0,0,0},{0,1,1,1,0,0},{0,0,0,0,1,0},{1,1,1,1,0,0},{0,0,0,0,0,0}}; break;
-        case 't': pattern = {{0,0,1,0,0,0},{0,0,1,0,0,0},{1,1,1,1,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,1,0,0,0},{0,0,1,1,0,0},{0,0,0,0,0,0}}; break;
-        case 'u': pattern = {{0,0,0,0,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,0,0,1,1,0},{0,1,1,0,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'v': pattern = {{0,0,0,0,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,1,0,1,0,0},{0,1,0,1,0,0},{0,0,1,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'w': pattern = {{0,0,0,0,0,0},{1,0,0,0,1,0},{1,0,1,0,1,0},{1,0,1,0,1,0},{1,1,0,1,1,0},{1,0,0,0,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case 'y': pattern = {{0,0,0,0,0,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{0,1,1,1,1,0},{0,0,0,0,1,0},{1,1,1,1,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        
-        // Numbers and punctuation
-        case '.': pattern = {{0,0,0,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0},{0,1,0,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case ':': pattern = {{0,0,0,0,0,0},{0,1,0,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0},{0,1,0,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case '!': pattern = {{0,1,0,0,0,0},{0,1,0,0,0,0},{0,1,0,0,0,0},{0,1,0,0,0,0},{0,0,0,0,0,0},{0,1,0,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        case '?': pattern = {{0,1,1,1,0,0},{1,0,0,0,1,0},{0,0,0,1,0,0},{0,0,1,0,0,0},{0,0,0,0,0,0},{0,0,1,0,0,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-        
-        // Default for unknown characters
-        default: pattern = {{1,1,1,1,1,0},{1,0,0,0,1,0},{1,0,1,0,1,0},{1,0,0,0,1,0},{1,0,0,0,1,0},{1,1,1,1,1,0},{0,0,0,0,0,0},{0,0,0,0,0,0}}; break;
-    }
-    
-    // Render the pattern
-    for (int row = 0; row < 8 && row < h; ++row) {
-        for (int col = 0; col < 6 && col < w; ++col) {
-            if (row < pattern.size() && col < pattern[row].size() && pattern[row][col] == 1) {
-                Rect pixel(x + col, y + row, 1, 1);
-                renderer->DrawRect(pixel, color);
-            }
-        }
-    }
-}

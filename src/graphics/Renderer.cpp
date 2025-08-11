@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include "TextRenderer.h"
 #include <iostream>
 
 Renderer::Renderer() 
@@ -21,10 +22,19 @@ bool Renderer::Initialize(SDL_Window* window) {
     
     SDL_GetWindowSize(window, &window_width_, &window_height_);
     
+    // Initialize text renderer
+    text_renderer_ = std::make_unique<TextRenderer>();
+    if (!text_renderer_->Initialize(renderer_)) {
+        std::cerr << "Warning: TextRenderer initialization failed, falling back to basic rendering" << std::endl;
+        text_renderer_.reset();
+    }
+    
     return true;
 }
 
 void Renderer::Shutdown() {
+    text_renderer_.reset();
+    
     for (auto& pair : texture_cache_) {
         SDL_DestroyTexture(pair.second);
     }
@@ -114,4 +124,16 @@ void Renderer::DrawRectWorld(const Rect& worldRect, const Vector2& cameraOffset,
 void Renderer::DrawTileWorld(SDL_Texture* texture, int tileIndex, const Vector2& worldPosition, const Vector2& cameraOffset, int tileSize) {
     Vector2 screenPos(worldPosition.x - cameraOffset.x, worldPosition.y - cameraOffset.y);
     DrawTile(texture, tileIndex, screenPos, tileSize);
+}
+
+void Renderer::RenderText(const std::string& text, int x, int y, SDL_Color color, int fontSize) {
+    if (text_renderer_) {
+        text_renderer_->RenderText(text, x, y, color, fontSize);
+    }
+}
+
+void Renderer::RenderWrappedText(const std::string& text, int x, int y, int maxWidth, SDL_Color color, int fontSize) {
+    if (text_renderer_) {
+        text_renderer_->RenderWrappedText(text, x, y, maxWidth, color, fontSize);
+    }
 }

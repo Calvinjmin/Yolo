@@ -4,6 +4,7 @@
 #include "FarmingSystem.h"
 #include "PotterySystem.h"
 #include "Player.h"
+#include "NPC.h"
 #include "Camera.h"
 #include "DialogueSystem.h"
 #include <iostream>
@@ -53,11 +54,20 @@ bool Game::Initialize() {
     }
     
     input_manager_ = std::make_unique<InputManager>();
-    farming_system_ = std::make_unique<FarmingSystem>(6, 4); // Even smaller farm grid for compact world
+    farming_system_ = std::make_unique<FarmingSystem>(6, 4);
     pottery_system_ = std::make_unique<PotterySystem>();
     player_ = std::make_unique<Player>();
     camera_ = std::make_unique<Camera>();
     dialogue_system_ = std::make_unique<DialogueSystem>();
+    
+    // Position NPC in bottom left grass area
+    const int TILE_SIZE = 128;
+    std::vector<std::string> breederDialogue = {
+        "Hello there, traveler!",
+        "I'm the village breeder.",
+        "I take care of the animals around here.",
+    };
+    breeder_npc_ = std::make_unique<NPC>(1 * TILE_SIZE + 32, 6 * TILE_SIZE + 32, breederDialogue);
     
     // Set camera viewport to window size
     camera_->SetViewportSize(WINDOW_WIDTH, WINDOW_HEIGHT);
@@ -67,6 +77,14 @@ bool Game::Initialize() {
     
     // Initialize dialogue system
     dialogue_system_->Initialize();
+    
+    // Register dynamic interactables
+    dialogue_system_->RegisterDynamicInteractable(breeder_npc_.get());
+    
+    // Set up collision callback for NPCs
+    player_->SetCollisionCallback([this](const Vector2& position) {
+        return this->CheckNPCCollision(position);
+    });
     
     running_ = true;
     return true;
@@ -100,17 +118,16 @@ void Game::HandleEvents() {
 }
 
 void Game::Update(float deltaTime) {
-    // Cmd+Q always quits the game
+    // CMD + Q quits the game
     if (input_manager_->IsActionPressed(InputAction::QUIT)) {
         running_ = false;
     }
     
-    // ESC/Q only exit dialogue (don't quit game)
+    // ESC quits the dialogue
     if (input_manager_->IsActionPressed(InputAction::MENU)) {
         if (dialogue_system_->IsDialogueActive()) {
-            dialogue_system_->HideDialogue(); // Exit dialogue if active
+            dialogue_system_->HideDialogue(); 
         }
-        // Note: No longer quit game when no dialogue - only Cmd+Q quits
     }
 
     player_->HandleInput(input_manager_.get());
@@ -123,7 +140,6 @@ void Game::Update(float deltaTime) {
     // Update dialogue system
     dialogue_system_->Update(deltaTime);
     
-    // Continuously check for nearby interactions
     Vector2 playerPos = player_->GetPosition();
     InteractableType nearbyType = dialogue_system_->CheckNearbyInteraction(playerPos);
     
@@ -150,10 +166,11 @@ void Game::Update(float deltaTime) {
         dialogue_system_->NextDialogue();
     }
     
-    // Q key to exit dialogue (handled above in MENU section)
     
+    // === Loading Objects ===
     farming_system_->Update(deltaTime);
     pottery_system_->Update(deltaTime);
+    breeder_npc_->Update(deltaTime);
     
     // Update input manager at the end to prepare for next frame
     input_manager_->Update();
@@ -164,12 +181,10 @@ void Game::Render() {
     
     Vector2 cameraOffset = camera_->GetOffset();
     
-    // Draw Studio Ghibli-style background - intimate world slightly larger than screen
     const int TILE_SIZE = 128;
-    const int WORLD_WIDTH_TILES = 10;  // 1280px total (slightly larger than 1024px screen)
-    const int WORLD_HEIGHT_TILES = 8;  // 1024px total (slightly larger than 768px screen)
+    const int WORLD_WIDTH_TILES = 10;  
+    const int WORLD_HEIGHT_TILES = 8;  
     
-    // Enhanced Studio Ghibli color palette - warmer and more organic
     SDL_Color ghibliSky = {173, 216, 230, 255};          // Soft powder blue sky
     SDL_Color ghibliGrass = {118, 154, 57, 255};         // Warmer, more golden grass
     SDL_Color ghibliGarden = {95, 127, 58, 255};         // Lush garden green
@@ -180,7 +195,6 @@ void Game::Render() {
     SDL_Color farmSoil = {139, 90, 43, 255};             // Rich earth brown
     SDL_Color dirtPath = {160, 130, 98, 255};            // Warm dirt path color
     
-    // Additional Ghibli-inspired colors for variation
     SDL_Color roofAccent = {139, 26, 26, 255};           // Darker roof edges
     SDL_Color windowBlue = {100, 149, 237, 255};         // Window accents
     SDL_Color gardenFlower = {255, 182, 193, 255};       // Light pink flowers
@@ -201,7 +215,6 @@ void Game::Render() {
         }
     }
     
-    // Water border around the perimeter with wave details
     // Top border
     for (int x = 0; x < WORLD_WIDTH_TILES; x++) {
         Rect waterRect(x * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE);
@@ -683,11 +696,10 @@ void Game::Render() {
         }
     }
     
-    // Render farm first (background)
-    // Section Rendering
-    // farming_system_->Render(renderer_.get());
-    // pottery_system_->Render(renderer_.get());
 
+    // Render NPC
+    breeder_npc_->Render(renderer_.get(), cameraOffset);
+    
     // Render player with camera offset
     player_->Render(renderer_.get(), cameraOffset);
     
@@ -697,8 +709,35 @@ void Game::Render() {
     renderer_->Present();
 }
 
+bool Game::CheckNPCCollision(const Vector2& playerPosition) const {
+    const int PLAYER_WIDTH = 32;
+    const int PLAYER_HEIGHT = 32;
+    
+    // Player collision rectangle
+    Rect playerRect(
+        static_cast<int>(playerPosition.x),
+        static_cast<int>(playerPosition.y),
+        PLAYER_WIDTH,
+        PLAYER_HEIGHT
+    );
+    
+    // Check collision with breeder NPC
+    if (breeder_npc_) {
+        Rect npcRect = breeder_npc_->GetCollisionBounds();
+        if (playerRect.x < npcRect.x + npcRect.w && 
+            playerRect.x + playerRect.w > npcRect.x && 
+            playerRect.y < npcRect.y + npcRect.h && 
+            playerRect.y + playerRect.h > npcRect.y) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
 void Game::Shutdown() {
     dialogue_system_.reset();
+    breeder_npc_.reset();
     camera_.reset();
     pottery_system_.reset();
     farming_system_.reset();

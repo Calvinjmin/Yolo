@@ -1,5 +1,6 @@
 #pragma once
 #include <SDL.h>
+#include <functional>
 #include "Renderer.h"
 
 class InputManager;
@@ -18,11 +19,13 @@ public:
     void SetPosition(const Vector2& position) { position_ = position; }
     
     bool CheckCollision(const Vector2& newPosition) const;
+    void SetCollisionCallback(std::function<bool(const Vector2&)> callback);
     
 private:
     Vector2 position_;
     Vector2 velocity_;
     float speed_;
+    std::function<bool(const Vector2&)> externalCollisionCheck_;
     
     const int PLAYER_WIDTH = 32;
     const int PLAYER_HEIGHT = 32;

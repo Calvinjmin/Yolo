@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <memory>
 
+class TextRenderer;
+
 struct Vector2 {
     float x, y;
     Vector2(float x = 0, float y = 0) : x(x), y(y) {}
@@ -39,10 +41,16 @@ public:
     int GetWindowWidth() const { return window_width_; }
     int GetWindowHeight() const { return window_height_; }
     
+    // Text rendering methods
+    void RenderText(const std::string& text, int x, int y, SDL_Color color, int fontSize = 16);
+    void RenderWrappedText(const std::string& text, int x, int y, int maxWidth, SDL_Color color, int fontSize = 16);
+    TextRenderer* GetTextRenderer() { return text_renderer_.get(); }
+    
 private:
     SDL_Renderer* renderer_;
     int window_width_;
     int window_height_;
     
     std::unordered_map<std::string, SDL_Texture*> texture_cache_;
+    std::unique_ptr<TextRenderer> text_renderer_;
 };

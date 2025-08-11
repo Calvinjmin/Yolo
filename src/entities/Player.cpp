@@ -4,8 +4,7 @@
 #include <cstdio>
 
 Player::Player() 
-    : position_(640.0f, 512.0f), velocity_(0.0f, 0.0f), speed_(200.0f) {
-    // Start at center of compact world (1280x1024)
+    : position_(640.0f, 512.0f), velocity_(0.0f, 0.0f), speed_(200.0f), externalCollisionCheck_(nullptr) {
 }
 
 Player::~Player() {
@@ -146,5 +145,14 @@ bool Player::CheckCollision(const Vector2& newPosition) const {
         }
     }
     
+    // Check external collision callback (for NPCs and other dynamic objects)
+    if (externalCollisionCheck_ && externalCollisionCheck_(newPosition)) {
+        return true;
+    }
+    
     return false; // No collision detected
+}
+
+void Player::SetCollisionCallback(std::function<bool(const Vector2&)> callback) {
+    externalCollisionCheck_ = callback;
 }

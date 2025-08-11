@@ -1,5 +1,6 @@
 #pragma once
 #include "Player.h"
+#include "NPC.h"
 #include <SDL.h>
 #include <SDL_image.h>
 #include <memory>
@@ -27,6 +28,7 @@ private:
   void Update(float deltaTime);
   void Render();
   void HandleEvents();
+  bool CheckNPCCollision(const Vector2& playerPosition) const;
 
   bool running_;
   SDL_Window *window_;
@@ -38,6 +40,7 @@ private:
   std::unique_ptr<Player> player_;
   std::unique_ptr<Camera> camera_;
   std::unique_ptr<DialogueSystem> dialogue_system_;
+  std::unique_ptr<NPC> breeder_npc_;
 
   static Game *instance_;
 

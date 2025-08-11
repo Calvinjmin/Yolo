@@ -3,15 +3,7 @@
 #include <vector>
 #include <SDL.h>
 #include "Renderer.h"
-
-enum class InteractableType {
-    HOUSE,
-    FARM,
-    GARDEN_FLOWER,
-    GARDEN_BUSH,
-    WATER,
-    NONE
-};
+#include "Interactable.h"
 
 struct InteractionZone {
     Rect bounds;
@@ -42,6 +34,8 @@ public:
     void SetNearInteractable(bool near, InteractableType type = InteractableType::NONE);
     
     void SetupInteractionZones();
+    void RegisterDynamicInteractable(Interactable* interactable);
+    InteractableType CheckNearbyDynamicInteraction(const Vector2& playerPosition);
     
 private:
     bool isActive_;
@@ -53,11 +47,9 @@ private:
     float fadeAlpha_;
     
     std::vector<InteractionZone> interactionZones_;
+    std::vector<Interactable*> dynamicInteractables_;
     
     void RenderDialogueBox(Renderer* renderer, int windowWidth, int windowHeight);
     void RenderInteractionPrompt(Renderer* renderer, int windowWidth, int windowHeight);
-    void RenderText(Renderer* renderer, const std::string& text, int x, int y);
-    void RenderHintText(Renderer* renderer, const std::string& text, int x, int y, SDL_Color color);
-    void RenderCharacter(Renderer* renderer, char c, int x, int y, int w, int h, SDL_Color color);
     std::vector<std::string> GetDialogueForType(InteractableType type);
 };
