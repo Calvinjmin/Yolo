@@ -1,5 +1,6 @@
 #include "InputManager.h"
 #include <cstdio>
+#include <iostream>
 
 InputManager::InputManager() {
     InitializeKeyBindings();
@@ -14,11 +15,11 @@ void InputManager::InitializeKeyBindings() {
     key_bindings_[SDLK_LEFT] = InputAction::MOVE_LEFT;
     key_bindings_[SDLK_d] = InputAction::MOVE_RIGHT;
     key_bindings_[SDLK_RIGHT] = InputAction::MOVE_RIGHT;
-    key_bindings_[SDLK_e] = InputAction::INTERACT;
-    key_bindings_[SDLK_SPACE] = InputAction::USE_TOOL;
+    key_bindings_[SDLK_SPACE] = InputAction::INTERACT;
+    key_bindings_[SDLK_e] = InputAction::USE_TOOL;
     key_bindings_[SDLK_i] = InputAction::INVENTORY;
     key_bindings_[SDLK_ESCAPE] = InputAction::MENU;
-    key_bindings_[SDLK_q] = InputAction::QUIT; // Add back regular Q quit for testing
+    key_bindings_[SDLK_q] = InputAction::MENU; // Q closes menus/dialogues
 }
 
 void InputManager::Update() {
@@ -58,6 +59,7 @@ bool InputManager::IsActionPressed(InputAction action) const {
     
     bool currentPressed = (currentIt != current_state_.end()) ? currentIt->second : false;
     bool previousPressed = (previousIt != previous_state_.end()) ? previousIt->second : false;
+    
     
     return currentPressed && !previousPressed;
 }

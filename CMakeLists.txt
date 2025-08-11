@@ -26,6 +26,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/entities
     ${CMAKE_CURRENT_SOURCE_DIR}/include/systems
     ${CMAKE_CURRENT_SOURCE_DIR}/include/utils
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/ui
 )
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")

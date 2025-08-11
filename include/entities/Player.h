@@ -17,6 +17,8 @@ public:
     Vector2 GetPosition() const { return position_; }
     void SetPosition(const Vector2& position) { position_ = position; }
     
+    bool CheckCollision(const Vector2& newPosition) const;
+    
 private:
     Vector2 position_;
     Vector2 velocity_;

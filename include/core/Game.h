@@ -10,6 +10,7 @@ class InputManager;
 class FarmingSystem;
 class PotterySystem;
 class Camera;
+class DialogueSystem;
 
 class Game {
 public:
@@ -36,6 +37,7 @@ private:
   std::unique_ptr<PotterySystem> pottery_system_;
   std::unique_ptr<Player> player_;
   std::unique_ptr<Camera> camera_;
+  std::unique_ptr<DialogueSystem> dialogue_system_;
 
   static Game *instance_;
 

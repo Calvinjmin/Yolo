@@ -16,6 +16,9 @@ bool Renderer::Initialize(SDL_Window* window) {
         return false;
     }
     
+    // Enable alpha blending
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    
     SDL_GetWindowSize(window, &window_width_, &window_height_);
     
     return true;
@@ -34,7 +37,7 @@ void Renderer::Shutdown() {
 }
 
 void Renderer::Clear() {
-    SDL_SetRenderDrawColor(renderer_, 34, 139, 34, 255); // Forest green background
+    SDL_SetRenderDrawColor(renderer_, 173, 216, 230, 255); // Ghibli soft powder blue sky
     SDL_RenderClear(renderer_);
 }
 
