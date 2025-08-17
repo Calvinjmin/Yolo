@@ -57,19 +57,82 @@ void Player::Update(float deltaTime) {
 }
 
 void Player::Render(Renderer* renderer, const Vector2& cameraOffset) {
-    // Convert world position to screen position
-    Vector2 screenPos(position_.x - cameraOffset.x, position_.y - cameraOffset.y);
+    // Player colors - using green theme to distinguish from blue NPCs
+    SDL_Color playerGreen = {60, 180, 75, 255};        // Main body color
+    SDL_Color playerHighlight = {90, 210, 105, 255};   // Highlight color
+    SDL_Color playerShadow = {40, 120, 50, 255};       // Shadow color
     
-    Rect playerRect(
-        static_cast<int>(screenPos.x),
-        static_cast<int>(screenPos.y),
+    // Player shadow (offset for depth)
+    Rect shadowRect(
+        static_cast<int>(position_.x - cameraOffset.x + 4),
+        static_cast<int>(position_.y - cameraOffset.y + 4),
         PLAYER_WIDTH,
         PLAYER_HEIGHT
     );
+    renderer->DrawRect(shadowRect, SDL_Color{0, 0, 0, 60});
     
-    SDL_Color green = {0, 255, 0, 255};
-    renderer->DrawRect(playerRect, green);
+    // Main player body
+    Rect playerRect(
+        static_cast<int>(position_.x - cameraOffset.x),
+        static_cast<int>(position_.y - cameraOffset.y),
+        PLAYER_WIDTH,
+        PLAYER_HEIGHT
+    );
+    renderer->DrawRect(playerRect, playerGreen);
     
+    // Player highlight (top edge for 3D effect)
+    Rect highlightRect(
+        static_cast<int>(position_.x - cameraOffset.x),
+        static_cast<int>(position_.y - cameraOffset.y),
+        PLAYER_WIDTH,
+        6
+    );
+    renderer->DrawRect(highlightRect, playerHighlight);
+    
+    // Player depth edge (right side for 3D effect)
+    Rect depthRect(
+        static_cast<int>(position_.x - cameraOffset.x + PLAYER_WIDTH - 4),
+        static_cast<int>(position_.y - cameraOffset.y + 6),
+        4,
+        PLAYER_HEIGHT - 6
+    );
+    renderer->DrawRect(depthRect, playerShadow);
+    
+    // Character face - eyes
+    Rect leftEye(
+        static_cast<int>(position_.x - cameraOffset.x + 8),
+        static_cast<int>(position_.y - cameraOffset.y + 10),
+        4, 4
+    );
+    Rect rightEye(
+        static_cast<int>(position_.x - cameraOffset.x + 20),
+        static_cast<int>(position_.y - cameraOffset.y + 10),
+        4, 4
+    );
+    renderer->DrawRect(leftEye, SDL_Color{255, 255, 255, 255});
+    renderer->DrawRect(rightEye, SDL_Color{255, 255, 255, 255});
+    
+    // Eye pupils
+    Rect leftPupil(
+        static_cast<int>(position_.x - cameraOffset.x + 9),
+        static_cast<int>(position_.y - cameraOffset.y + 11),
+        2, 2
+    );
+    Rect rightPupil(
+        static_cast<int>(position_.x - cameraOffset.x + 21),
+        static_cast<int>(position_.y - cameraOffset.y + 11),
+        2, 2
+    );
+    renderer->DrawRect(leftPupil, SDL_Color{0, 0, 0, 255});
+    renderer->DrawRect(rightPupil, SDL_Color{0, 0, 0, 255});
+    
+    // Optional: Add a simple mouth for more character
+    Rect mouth(
+        static_cast<int>(position_.x - cameraOffset.x + 12),
+        static_cast<int>(position_.y - cameraOffset.y + 20),
+        8, 2
+    );
+    renderer->DrawRect(mouth, SDL_Color{40, 40, 40, 255});
 }
 
 bool Player::CheckCollision(const Vector2& newPosition) const {
@@ -102,48 +165,30 @@ bool Player::CheckCollision(const Vector2& newPosition) const {
         return true;
     }
     
-    // Farm area collision (tiles 6,2 to 8,4)
-    Rect farmRect(6 * TILE_SIZE, 2 * TILE_SIZE, 3 * TILE_SIZE, 3 * TILE_SIZE);
-    if (playerRect.x < farmRect.x + farmRect.w && 
-        playerRect.x + playerRect.w > farmRect.x && 
-        playerRect.y < farmRect.y + farmRect.h && 
-        playerRect.y + playerRect.h > farmRect.y) {
+    // Farm area - now fully walkable (dynamic objects handle their own collision)
+    
+    // Garden area - now fully walkable (dynamic objects handle their own collision)
+    
+    // Very minimal bushes - only a few strategic ones
+    // Bush at (3,5) - corner
+    Rect bush1(3 * TILE_SIZE + 50, 5 * TILE_SIZE + 50, 30, 20);
+    if (playerRect.x < bush1.x + bush1.w && 
+        playerRect.x + playerRect.w > bush1.x && 
+        playerRect.y < bush1.y + bush1.h && 
+        playerRect.y + playerRect.h > bush1.y) {
         return true;
     }
     
-    // Garden flower patches (specific collision spots)
-    // Flower patch at (4,5)
-    Rect flowerPatch1(4 * TILE_SIZE + 20, 5 * TILE_SIZE + 20, 80, 80);
-    if (playerRect.x < flowerPatch1.x + flowerPatch1.w && 
-        playerRect.x + playerRect.w > flowerPatch1.x && 
-        playerRect.y < flowerPatch1.y + flowerPatch1.h && 
-        playerRect.y + playerRect.h > flowerPatch1.y) {
+    // Bush at (6,5) - corner
+    Rect bush2(6 * TILE_SIZE + 50, 5 * TILE_SIZE + 50, 30, 20);
+    if (playerRect.x < bush2.x + bush2.w && 
+        playerRect.x + playerRect.w > bush2.x && 
+        playerRect.y < bush2.y + bush2.h && 
+        playerRect.y + playerRect.h > bush2.y) {
         return true;
     }
     
-    // Flower patch at (6,6)
-    Rect flowerPatch2(6 * TILE_SIZE + 20, 6 * TILE_SIZE + 20, 80, 80);
-    if (playerRect.x < flowerPatch2.x + flowerPatch2.w && 
-        playerRect.x + playerRect.w > flowerPatch2.x && 
-        playerRect.y < flowerPatch2.y + flowerPatch2.h && 
-        playerRect.y + playerRect.h > flowerPatch2.y) {
-        return true;
-    }
-    
-    // Bushes in garden area (tiles where (x+y) % 3 == 1)
-    for (int y = 5; y < 7; y++) {
-        for (int x = 3; x < 7; x++) {
-            if ((x + y) % 3 == 1) {
-                Rect bushRect(x * TILE_SIZE + 40, y * TILE_SIZE + 40, 40, 30);
-                if (playerRect.x < bushRect.x + bushRect.w && 
-                    playerRect.x + playerRect.w > bushRect.x && 
-                    playerRect.y < bushRect.y + bushRect.h && 
-                    playerRect.y + playerRect.h > bushRect.y) {
-                    return true;
-                }
-            }
-        }
-    }
+    // Leave the entire middle area (tiles 4,5 - 5,6 and 3,6 - 4,6) completely walkable
     
     // Check external collision callback (for NPCs and other dynamic objects)
     if (externalCollisionCheck_ && externalCollisionCheck_(newPosition)) {

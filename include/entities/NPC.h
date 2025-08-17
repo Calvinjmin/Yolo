@@ -21,6 +21,7 @@ public:
   Rect GetInteractionBounds() const override;
   InteractableType GetType() const override;
   std::vector<std::string> GetDialogue() const override;
+  float GetInteractionRadius() const override { return 45.0f; }
   
   // Dialogue management
   std::string GetCurrentDialogue() const;

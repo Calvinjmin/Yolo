@@ -1,12 +1,13 @@
 #include "DialogueSystem.h"
 #include "NPC.h"
+#include "InteractableObject.h"
 #include <algorithm>
 #include <iostream>
 
 DialogueSystem::DialogueSystem() 
     : isActive_(false), nearInteractable_(false), currentText_(""), 
       currentType_(InteractableType::NONE), nearbyType_(InteractableType::NONE),
-      displayTimer_(0.0f), fadeAlpha_(0.0f) {
+      currentInteractable_(nullptr), displayTimer_(0.0f), fadeAlpha_(0.0f) {
 }
 
 DialogueSystem::~DialogueSystem() {
@@ -45,6 +46,24 @@ void DialogueSystem::SetupInteractionZones() {
         "These flowers attract butterflies and bees."
     };
     interactionZones_.push_back(InteractionZone(gardenZone, InteractableType::GARDEN_FLOWER, gardenDialogues));
+    
+    // Farm flower patch 1 (top-left corner: tile 6,2)
+    Rect farmFlower1Zone(6 * TILE_SIZE, 2 * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    std::vector<std::string> farmFlower1Dialogues = {
+        "These lovely flowers brighten up the farm area.",
+        "Pink, yellow, and coral blooms dance in the breeze.",
+        "The flowers seem well-tended and healthy."
+    };
+    interactionZones_.push_back(InteractionZone(farmFlower1Zone, InteractableType::FARM_FLOWERS, farmFlower1Dialogues));
+    
+    // Farm flower patch 2 (bottom-right corner: tile 8,4)
+    Rect farmFlower2Zone(8 * TILE_SIZE, 4 * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    std::vector<std::string> farmFlower2Dialogues = {
+        "A colorful patch of flowers adds beauty to this corner.",
+        "The farmer must have a soft spot for flowers.",
+        "These blooms provide a nice contrast to the crops."
+    };
+    interactionZones_.push_back(InteractionZone(farmFlower2Zone, InteractableType::FARM_FLOWERS, farmFlower2Dialogues));
 }
 
 void DialogueSystem::Update(float deltaTime) {
@@ -81,8 +100,20 @@ InteractableType DialogueSystem::CheckNearbyInteraction(const Vector2& playerPos
     
     // Then check static zones
     for (const auto& zone : interactionZones_) {
-        // Check if player is near the interaction zone (large area for easy interaction)
-        int expandedMargin = 80;
+        // Much more accurate interaction margins based on zone type
+        int expandedMargin;
+        if (zone.type == InteractableType::FARM_FLOWERS) {
+            expandedMargin = 25; // Very close for flower patches
+        } else if (zone.type == InteractableType::GARDEN_FLOWER) {
+            expandedMargin = 30; // Close for garden flowers
+        } else if (zone.type == InteractableType::FARM) {
+            expandedMargin = 35; // Close for farm areas
+        } else if (zone.type == InteractableType::HOUSE) {
+            expandedMargin = 40; // Slightly larger for house
+        } else {
+            expandedMargin = 35; // Reasonable default for other zones
+        }
+        
         if (playerRect.x < zone.bounds.x + zone.bounds.w + expandedMargin && 
             playerRect.x + playerRect.w > zone.bounds.x - expandedMargin && 
             playerRect.y < zone.bounds.y + zone.bounds.h + expandedMargin && 
@@ -108,13 +139,16 @@ bool DialogueSystem::CheckInteraction(const Vector2& playerPosition, const Vecto
 
 void DialogueSystem::ShowDialogue(InteractableType type) {
     currentType_ = type;
+    currentInteractable_ = nullptr;
     
     if (type == InteractableType::NPC) {
-        // Handle dynamic NPCs
+        // Handle dynamic NPCs - this should not be used anymore
+        // Use ShowDialogue(Interactable*) instead
         for (const auto& interactable : dynamicInteractables_) {
             if (interactable && interactable->GetType() == type) {
                 if (auto npc = dynamic_cast<NPC*>(interactable)) {
                     currentText_ = npc->GetCurrentDialogue();
+                    currentInteractable_ = interactable;
                     break;
                 }
             }
@@ -137,18 +171,44 @@ void DialogueSystem::ShowDialogue(InteractableType type) {
     fadeAlpha_ = 255.0f; // Start fully visible
 }
 
+void DialogueSystem::ShowDialogue(Interactable* specificInteractable) {
+    if (!specificInteractable) return;
+    
+    currentType_ = specificInteractable->GetType();
+    currentInteractable_ = specificInteractable;
+    
+    if (auto npc = dynamic_cast<NPC*>(specificInteractable)) {
+        currentText_ = npc->GetCurrentDialogue();
+    }
+    
+    isActive_ = true;
+    displayTimer_ = 0.0f;
+    fadeAlpha_ = 255.0f; // Start fully visible
+}
+
+void DialogueSystem::ShowDialogue(InteractableObject* specificObject) {
+    if (!specificObject) return;
+    
+    currentType_ = specificObject->GetType();
+    currentInteractable_ = specificObject; // InteractableObject inherits from Interactable
+    
+    auto dialogue = specificObject->GetDialogue();
+    if (!dialogue.empty()) {
+        currentText_ = dialogue[0]; // Show first dialogue
+    }
+    
+    isActive_ = true;
+    displayTimer_ = 0.0f;
+    fadeAlpha_ = 255.0f; // Start fully visible
+}
+
 void DialogueSystem::NextDialogue() {
-    if (currentType_ == InteractableType::NPC) {
-        // Handle dynamic NPCs
-        for (const auto& interactable : dynamicInteractables_) {
-            if (interactable && interactable->GetType() == currentType_) {
-                if (auto npc = dynamic_cast<NPC*>(interactable)) {
-                    npc->NextDialogue();
-                    currentText_ = npc->GetCurrentDialogue();
-                    displayTimer_ = 0.0f;
-                    break;
-                }
-            }
+    if (currentType_ == InteractableType::NPC && currentInteractable_) {
+        // Handle the specific NPC we're currently talking to
+        if (auto npc = dynamic_cast<NPC*>(currentInteractable_)) {
+            npc->NextDialogue();
+            currentText_ = npc->GetCurrentDialogue();
+            displayTimer_ = 0.0f;
         }
     } else {
         // Handle static zones
@@ -185,6 +245,16 @@ InteractableType DialogueSystem::CheckNearbyDynamicInteraction(const Vector2& pl
         }
     }
     return InteractableType::NONE;
+}
+
+Interactable* DialogueSystem::GetNearbyInteractable(const Vector2& playerPosition) const {
+    // Check dynamic interactables first (NPCs get priority)
+    for (const auto& interactable : dynamicInteractables_) {
+        if (interactable && interactable->IsPlayerInRange(playerPosition)) {
+            return interactable;
+        }
+    }
+    return nullptr;
 }
 
 std::vector<std::string> DialogueSystem::GetDialogueForType(InteractableType type) {

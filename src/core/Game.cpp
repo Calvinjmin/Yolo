@@ -1,4 +1,7 @@
 #include "Game.h"
+#include "GameInit.h"
+#include "NPCManager.h"
+#include "DynamicObjectManager.h"
 #include "Renderer.h"
 #include "InputManager.h"
 #include "FarmingSystem.h"
@@ -23,68 +26,33 @@ Game::~Game() {
 }
 
 bool Game::Initialize() {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
-        std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
+    // Initialize SDL
+    if (!GameInit::InitializeSDL()) {
         return false;
     }
     
-    if (!(IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG) & (IMG_INIT_PNG | IMG_INIT_JPG))) {
-        std::cerr << "IMG_Init Error: " << IMG_GetError() << std::endl;
-        return false;
-    }
-    
-    window_ = SDL_CreateWindow(
-        WINDOW_TITLE,
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
-        SDL_WINDOW_SHOWN
-    );
-    
+    // Create game window
+    window_ = GameInit::CreateGameWindow(WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
     if (!window_) {
-        std::cerr << "SDL_CreateWindow Error: " << SDL_GetError() << std::endl;
         return false;
     }
     
-    renderer_ = std::make_unique<Renderer>();
-    if (!renderer_->Initialize(window_)) {
-        std::cerr << "Failed to initialize renderer!" << std::endl;
+    // Initialize game systems
+    auto initResult = GameInit::InitializeGameSystems(window_, WINDOW_WIDTH, WINDOW_HEIGHT);
+    if (!initResult.renderer) {
         return false;
     }
     
-    input_manager_ = std::make_unique<InputManager>();
-    farming_system_ = std::make_unique<FarmingSystem>(6, 4);
-    pottery_system_ = std::make_unique<PotterySystem>();
-    player_ = std::make_unique<Player>();
-    camera_ = std::make_unique<Camera>();
-    dialogue_system_ = std::make_unique<DialogueSystem>();
-    
-    // Position NPC in bottom left grass area
-    const int TILE_SIZE = 128;
-    std::vector<std::string> breederDialogue = {
-        "Hello there, traveler!",
-        "I'm the village breeder.",
-        "I take care of the animals around here.",
-    };
-    breeder_npc_ = std::make_unique<NPC>(1 * TILE_SIZE + 32, 6 * TILE_SIZE + 32, breederDialogue);
-    
-    // Set camera viewport to window size
-    camera_->SetViewportSize(WINDOW_WIDTH, WINDOW_HEIGHT);
-    
-    // Set camera to follow player starting position
-    camera_->SetTarget(player_->GetPosition());
-    
-    // Initialize dialogue system
-    dialogue_system_->Initialize();
-    
-    // Register dynamic interactables
-    dialogue_system_->RegisterDynamicInteractable(breeder_npc_.get());
-    
-    // Set up collision callback for NPCs
-    player_->SetCollisionCallback([this](const Vector2& position) {
-        return this->CheckNPCCollision(position);
-    });
+    // Move initialized systems to member variables
+    renderer_ = std::move(initResult.renderer);
+    input_manager_ = std::move(initResult.input_manager);
+    farming_system_ = std::move(initResult.farming_system);
+    pottery_system_ = std::move(initResult.pottery_system);
+    player_ = std::move(initResult.player);
+    camera_ = std::move(initResult.camera);
+    dialogue_system_ = std::move(initResult.dialogue_system);
+    npc_manager_ = std::move(initResult.npc_manager);
+    dynamic_object_manager_ = std::move(initResult.dynamic_object_manager);
     
     running_ = true;
     return true;
@@ -141,20 +109,43 @@ void Game::Update(float deltaTime) {
     dialogue_system_->Update(deltaTime);
     
     Vector2 playerPos = player_->GetPosition();
-    InteractableType nearbyType = dialogue_system_->CheckNearbyInteraction(playerPos);
     
-    // Update dialogue system state based on proximity
-    if (nearbyType != InteractableType::NONE) {
-        dialogue_system_->SetNearInteractable(true, nearbyType);
+    // Check for interactable objects first (NPCs, dynamic objects)
+    bool nearInteractableObject = false;
+    Interactable* nearbyInteractable = nullptr;
+    
+    // Priority 1: Check for NPCs
+    auto* nearbyNPC = dialogue_system_->GetNearbyInteractable(playerPos);
+    if (nearbyNPC) {
+        nearInteractableObject = true;
+        nearbyInteractable = nearbyNPC;
+    }
+    
+    // Priority 2: Check for dynamic objects (like dog)
+    if (!nearInteractableObject) {
+        auto* nearbyDynamicObj = dynamic_object_manager_->GetInteractableNear(playerPos);
+        if (nearbyDynamicObj) {
+            nearInteractableObject = true;
+            nearbyInteractable = nearbyDynamicObj;
+        }
+    }
+    
+    // Update dialogue system state - only show interaction prompt for actual interactable objects
+    if (nearInteractableObject) {
+        dialogue_system_->SetNearInteractable(true, InteractableType::NPC); // Use NPC type for prompt
     } else {
         dialogue_system_->SetNearInteractable(false);
     }
     
-    // Handle dialogue interactions
+    // Handle dialogue interactions - only for interactable objects
     if (input_manager_->IsActionPressed(InputAction::INTERACT)) {
-        if (nearbyType != InteractableType::NONE) {
-            // Start interaction if near an object
-            dialogue_system_->ShowDialogue(nearbyType);
+        if (nearInteractableObject && nearbyInteractable) {
+            // Interact with the specific object
+            if (auto npc = dynamic_cast<NPC*>(nearbyInteractable)) {
+                dialogue_system_->ShowDialogue(npc);
+            } else if (auto dynamicObj = dynamic_cast<InteractableObject*>(nearbyInteractable)) {
+                dialogue_system_->ShowDialogue(dynamicObj);
+            }
         } else if (dialogue_system_->IsDialogueActive()) {
             // Hide dialogue if not near anything and dialogue is active
             dialogue_system_->HideDialogue();
@@ -170,7 +161,8 @@ void Game::Update(float deltaTime) {
     // === Loading Objects ===
     farming_system_->Update(deltaTime);
     pottery_system_->Update(deltaTime);
-    breeder_npc_->Update(deltaTime);
+    npc_manager_->UpdateAll(deltaTime);
+    dynamic_object_manager_->UpdateAll(deltaTime, player_->GetPosition());
     
     // Update input manager at the end to prepare for next frame
     input_manager_->Update();
@@ -401,134 +393,80 @@ void Game::Render() {
         }
     }
     
-    // Enhanced 3D raised farm beds (top-right, visible from start)
+    // Farm area with prepared flower beds (top-right, visible from start)
     for (int y = 2; y < 5; y++) {
         for (int x = 6; x < 9; x++) {
-            // Drop shadow for raised bed
-            Rect bedShadow(x * TILE_SIZE + 4, y * TILE_SIZE + 4, TILE_SIZE, TILE_SIZE);
-            renderer_->DrawRectWorld(bedShadow, cameraOffset, SDL_Color{0, 0, 0, 40});
-            
-            // Raised bed border (wooden frame)
-            Rect bedBorder(x * TILE_SIZE - 4, y * TILE_SIZE - 4, TILE_SIZE + 8, TILE_SIZE + 8);
-            renderer_->DrawRectWorld(bedBorder, cameraOffset, SDL_Color{101, 67, 33, 255}); // Dark wood
-            
-            // Bed border highlights
-            Rect borderHighlight(x * TILE_SIZE - 4, y * TILE_SIZE - 4, TILE_SIZE + 8, 4);
-            renderer_->DrawRectWorld(borderHighlight, cameraOffset, SDL_Color{139, 90, 43, 255}); // Lighter wood
-            Rect borderHighlightL(x * TILE_SIZE - 4, y * TILE_SIZE - 4, 4, TILE_SIZE + 8);
-            renderer_->DrawRectWorld(borderHighlightL, cameraOffset, SDL_Color{139, 90, 43, 255});
-            
-            // Soil base with texture
-            SDL_Color soilColor = ((x + y) % 2 == 0) ? farmSoil : SDL_Color{122, 77, 38, 255};
+            // Base farm soil
+            SDL_Color farmBase = {139, 90, 43, 255}; // Rich brown soil
             Rect farmRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-            renderer_->DrawRectWorld(farmRect, cameraOffset, soilColor);
+            renderer_->DrawRectWorld(farmRect, cameraOffset, farmBase);
             
-            // Add raised soil texture
-            for (int i = 0; i < 16; i++) {
-                int soilX = x * TILE_SIZE + 8 + (i % 4) * 28;
-                int soilY = y * TILE_SIZE + 8 + (i / 4) * 28;
-                Rect soilClump(soilX, soilY, 20, 20);
-                SDL_Color clumpColor = ((i % 3) == 0) ? 
-                    SDL_Color{110, 70, 30, 255} : SDL_Color{130, 85, 40, 255};
-                renderer_->DrawRectWorld(soilClump, cameraOffset, clumpColor);
-            }
+            // Check if this tile has a flower patch and create prepared bed
+            bool hasFlowerPatch = (x == 6 && y == 2) || (x == 8 && y == 4);
             
-            // Enhanced furrow lines with depth
-            for (int i = 0; i < 3; i++) {
-                // Dark furrow bottom
-                Rect furrowRect(x * TILE_SIZE + 10, y * TILE_SIZE + 20 + i * 35, TILE_SIZE - 20, 8);
-                renderer_->DrawRectWorld(furrowRect, cameraOffset, SDL_Color{78, 44, 22, 255});
-                // Furrow highlight edge
-                Rect furrowHighlight(x * TILE_SIZE + 10, y * TILE_SIZE + 18 + i * 35, TILE_SIZE - 20, 2);
-                renderer_->DrawRectWorld(furrowHighlight, cameraOffset, SDL_Color{150, 95, 45, 255});
-            }
-            
-            // Enhanced crop sprouts with shadows
-            if ((x + y) % 2 == 1) {
+            if (hasFlowerPatch) {
+                // Create a prepared flower bed with darker, richer soil
+                SDL_Color preparedSoil = {95, 127, 58, 255}; // Garden-like soil for flowers
+                Rect flowerBed(x * TILE_SIZE + 25, y * TILE_SIZE + 25, 65, 65);
+                renderer_->DrawRectWorld(flowerBed, cameraOffset, preparedSoil);
+                
+                // Add subtle prepared soil texture
                 for (int i = 0; i < 4; i++) {
-                    int sproutX = x * TILE_SIZE + 20 + (i % 2) * 60;
-                    int sproutY = y * TILE_SIZE + 30 + (i / 2) * 40;
-                    
-                    // Sprout shadow
-                    Rect sproutShadow(sproutX + 2, sproutY + 2, 12, 16);
-                    renderer_->DrawRectWorld(sproutShadow, cameraOffset, SDL_Color{0, 0, 0, 30});
-                    
-                    // Sprout base
-                    Rect sproutRect(sproutX, sproutY, 12, 16);
-                    renderer_->DrawRectWorld(sproutRect, cameraOffset, SDL_Color{34, 139, 34, 255});
-                    
-                    // Sprout highlight
-                    Rect sproutHighlight(sproutX, sproutY, 4, 6);
-                    renderer_->DrawRectWorld(sproutHighlight, cameraOffset, SDL_Color{60, 180, 60, 255});
-                    
-                    // Small leaves
-                    Rect leaf1(sproutX + 2, sproutY - 2, 8, 4);
-                    Rect leaf2(sproutX + 4, sproutY - 4, 6, 3);
-                    renderer_->DrawRectWorld(leaf1, cameraOffset, SDL_Color{50, 160, 50, 255});
-                    renderer_->DrawRectWorld(leaf2, cameraOffset, SDL_Color{40, 150, 40, 255});
+                    int soilX = x * TILE_SIZE + 30 + (i % 2) * 25;
+                    int soilY = y * TILE_SIZE + 30 + (i / 2) * 25;
+                    Rect soilPatch(soilX, soilY, 15, 15);
+                    SDL_Color soilVariation = ((i % 2) == 0) ? 
+                        SDL_Color{105, 137, 68, 255} : SDL_Color{85, 117, 48, 255};
+                    renderer_->DrawRectWorld(soilPatch, cameraOffset, soilVariation);
+                }
+            } else {
+                // Regular farm soil texture for non-flower areas
+                for (int i = 0; i < 6; i++) {
+                    int soilX = x * TILE_SIZE + 15 + (i % 3) * 32;
+                    int soilY = y * TILE_SIZE + 15 + (i / 3) * 32;
+                    Rect soilPatch(soilX, soilY, 20, 20);
+                    SDL_Color soilVariation = ((i % 2) == 0) ? 
+                        SDL_Color{125, 80, 38, 255} : SDL_Color{155, 100, 48, 255};
+                    renderer_->DrawRectWorld(soilPatch, cameraOffset, soilVariation);
                 }
             }
         }
     }
     
-    // Enhanced 3D garden with depth and shadows (bottom-center, visible from start)
+    // Garden area with prepared flower beds (bottom-center, visible from start)
     for (int y = 5; y < 7; y++) {
         for (int x = 3; x < 7; x++) {
-            // Garden grass base with subtle texture
+            // Garden grass base
             Rect gardenRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
             renderer_->DrawRectWorld(gardenRect, cameraOffset, ghibliGarden);
             
-            // Add grass texture variation
-            for (int i = 0; i < 20; i++) {
-                int grassX = x * TILE_SIZE + 5 + (i % 5) * 24;
-                int grassY = y * TILE_SIZE + 5 + (i / 5) * 24;
-                Rect grassPatch(grassX, grassY, 16, 16);
-                SDL_Color grassVariation = ((i % 3) == 0) ? 
-                    SDL_Color{95, 117, 42, 255} : SDL_Color{75, 97, 37, 255};
-                renderer_->DrawRectWorld(grassPatch, cameraOffset, grassVariation);
-            }
+            // Check if this tile has a flower patch and create prepared bed
+            bool hasFlowerPatch = (x == 4 && y == 5) || (x == 6 && y == 6);
             
-            // Enhanced flower clusters with 3D effect
-            if ((x == 4 && y == 5) || (x == 6 && y == 6)) {
-                // Flower patch shadow
-                Rect flowerShadow(x * TILE_SIZE + 23, y * TILE_SIZE + 23, 80, 80);
-                renderer_->DrawRectWorld(flowerShadow, cameraOffset, SDL_Color{0, 0, 0, 30});
+            if (hasFlowerPatch) {
+                // Create a prepared flower bed with richer garden soil
+                SDL_Color preparedGarden = {75, 97, 37, 255}; // Darker garden soil for flowers
+                Rect flowerBed(x * TILE_SIZE + 30, y * TILE_SIZE + 30, 55, 55);
+                renderer_->DrawRectWorld(flowerBed, cameraOffset, preparedGarden);
                 
-                // Raised flower patch base
-                Rect flowerPatchRect(x * TILE_SIZE + 20, y * TILE_SIZE + 20, 80, 80);
-                renderer_->DrawRectWorld(flowerPatchRect, cameraOffset, SDL_Color{60, 92, 32, 255});
-                
-                // Flower patch highlight edge
-                Rect patchHighlight(x * TILE_SIZE + 20, y * TILE_SIZE + 20, 80, 4);
-                renderer_->DrawRectWorld(patchHighlight, cameraOffset, SDL_Color{80, 112, 42, 255});
-                
-                // Individual 3D flowers
-                for (int i = 0; i < 6; i++) {
-                    int flowerX = x * TILE_SIZE + 30 + (i % 3) * 25;
-                    int flowerY = y * TILE_SIZE + 30 + (i / 3) * 25;
-                    
-                    // Flower shadow
-                    Rect flowerShadowSmall(flowerX + 2, flowerY + 2, 8, 8);
-                    renderer_->DrawRectWorld(flowerShadowSmall, cameraOffset, SDL_Color{0, 0, 0, 40});
-                    
-                    // Flower stem
-                    Rect flowerStem(flowerX + 3, flowerY + 6, 2, 8);
-                    renderer_->DrawRectWorld(flowerStem, cameraOffset, SDL_Color{34, 139, 34, 255});
-                    
-                    // Flower head
-                    Rect flowerRect(flowerX, flowerY, 8, 8);
-                    SDL_Color flowerColor = (i % 2 == 0) ? gardenFlower : SDL_Color{255, 255, 0, 255};
-                    renderer_->DrawRectWorld(flowerRect, cameraOffset, flowerColor);
-                    
-                    // Flower highlight
-                    Rect flowerHighlight(flowerX + 1, flowerY + 1, 3, 3);
-                    SDL_Color highlightColor = (i % 2 == 0) ? 
-                        SDL_Color{255, 220, 220, 255} : SDL_Color{255, 255, 180, 255};
-                    renderer_->DrawRectWorld(flowerHighlight, cameraOffset, highlightColor);
-                    
-                    // Flower center
-                    Rect flowerCenter(flowerX + 3, flowerY + 3, 2, 2);
-                    renderer_->DrawRectWorld(flowerCenter, cameraOffset, SDL_Color{255, 165, 0, 255});
+                // Add subtle prepared garden texture
+                for (int i = 0; i < 4; i++) {
+                    int soilX = x * TILE_SIZE + 35 + (i % 2) * 20;
+                    int soilY = y * TILE_SIZE + 35 + (i / 2) * 20;
+                    Rect soilPatch(soilX, soilY, 12, 12);
+                    SDL_Color soilVariation = ((i % 2) == 0) ? 
+                        SDL_Color{85, 107, 47, 255} : SDL_Color{65, 87, 27, 255};
+                    renderer_->DrawRectWorld(soilPatch, cameraOffset, soilVariation);
+                }
+            } else {
+                // Regular grass texture for non-flower areas
+                for (int i = 0; i < 15; i++) {
+                    int grassX = x * TILE_SIZE + 10 + (i % 5) * 22;
+                    int grassY = y * TILE_SIZE + 10 + (i / 5) * 22;
+                    Rect grassPatch(grassX, grassY, 14, 14);
+                    SDL_Color grassVariation = ((i % 3) == 0) ? 
+                        SDL_Color{95, 117, 42, 255} : SDL_Color{75, 97, 37, 255};
+                    renderer_->DrawRectWorld(grassPatch, cameraOffset, grassVariation);
                 }
             }
             
@@ -697,8 +635,11 @@ void Game::Render() {
     }
     
 
-    // Render NPC
-    breeder_npc_->Render(renderer_.get(), cameraOffset);
+    // Render all NPCs
+    npc_manager_->RenderAll(renderer_.get(), cameraOffset);
+    
+    // Render all dynamic objects (including dog)
+    dynamic_object_manager_->RenderAll(renderer_.get(), cameraOffset);
     
     // Render player with camera offset
     player_->Render(renderer_.get(), cameraOffset);
@@ -710,34 +651,13 @@ void Game::Render() {
 }
 
 bool Game::CheckNPCCollision(const Vector2& playerPosition) const {
-    const int PLAYER_WIDTH = 32;
-    const int PLAYER_HEIGHT = 32;
-    
-    // Player collision rectangle
-    Rect playerRect(
-        static_cast<int>(playerPosition.x),
-        static_cast<int>(playerPosition.y),
-        PLAYER_WIDTH,
-        PLAYER_HEIGHT
-    );
-    
-    // Check collision with breeder NPC
-    if (breeder_npc_) {
-        Rect npcRect = breeder_npc_->GetCollisionBounds();
-        if (playerRect.x < npcRect.x + npcRect.w && 
-            playerRect.x + playerRect.w > npcRect.x && 
-            playerRect.y < npcRect.y + npcRect.h && 
-            playerRect.y + playerRect.h > npcRect.y) {
-            return true;
-        }
-    }
-    
-    return false;
+    return npc_manager_ ? npc_manager_->CheckCollisionWithAny(playerPosition) : false;
 }
 
 void Game::Shutdown() {
     dialogue_system_.reset();
-    breeder_npc_.reset();
+    dynamic_object_manager_.reset();
+    npc_manager_.reset();
     camera_.reset();
     pottery_system_.reset();
     farming_system_.reset();
@@ -745,11 +665,6 @@ void Game::Shutdown() {
     player_.reset();
     renderer_.reset();
     
-    if (window_) {
-        SDL_DestroyWindow(window_);
-        window_ = nullptr;
-    }
-    
-    IMG_Quit();
-    SDL_Quit();
+    GameInit::ShutdownSDL(window_);
+    window_ = nullptr;
 }

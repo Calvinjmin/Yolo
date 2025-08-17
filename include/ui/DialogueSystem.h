@@ -27,6 +27,8 @@ public:
     bool CheckInteraction(const Vector2& playerPosition, const Vector2& cameraOffset);
     InteractableType CheckNearbyInteraction(const Vector2& playerPosition) const;
     void ShowDialogue(InteractableType type);
+    void ShowDialogue(Interactable* specificInteractable);
+    void ShowDialogue(class InteractableObject* specificObject);
     void HideDialogue();
     void NextDialogue();
     bool IsDialogueActive() const { return isActive_; }
@@ -36,6 +38,7 @@ public:
     void SetupInteractionZones();
     void RegisterDynamicInteractable(Interactable* interactable);
     InteractableType CheckNearbyDynamicInteraction(const Vector2& playerPosition);
+    Interactable* GetNearbyInteractable(const Vector2& playerPosition) const;
     
 private:
     bool isActive_;
@@ -43,6 +46,7 @@ private:
     std::string currentText_;
     InteractableType currentType_;
     InteractableType nearbyType_;
+    Interactable* currentInteractable_;
     float displayTimer_;
     float fadeAlpha_;
     

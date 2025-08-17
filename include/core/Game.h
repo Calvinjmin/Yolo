@@ -1,6 +1,5 @@
 #pragma once
 #include "Player.h"
-#include "NPC.h"
 #include <SDL.h>
 #include <SDL_image.h>
 #include <memory>
@@ -12,6 +11,8 @@ class FarmingSystem;
 class PotterySystem;
 class Camera;
 class DialogueSystem;
+class NPCManager;
+class DynamicObjectManager;
 
 class Game {
 public:
@@ -40,7 +41,8 @@ private:
   std::unique_ptr<Player> player_;
   std::unique_ptr<Camera> camera_;
   std::unique_ptr<DialogueSystem> dialogue_system_;
-  std::unique_ptr<NPC> breeder_npc_;
+  std::unique_ptr<NPCManager> npc_manager_;
+  std::unique_ptr<DynamicObjectManager> dynamic_object_manager_;
 
   static Game *instance_;
 
